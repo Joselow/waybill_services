@@ -1,0 +1,21 @@
+{
+  "name": "send_guides_gpp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/daemon.js",
+    "daemon:emit": "node src/daemon.js",
+    "daemon:generate": "node src/daemon-generate.js",
+    "daemon:consult": "node src/daemon-consult.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.13.6",
+    "dotenv": "^16.6.1"
+  }
+}
