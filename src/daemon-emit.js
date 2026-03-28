@@ -6,7 +6,7 @@
  * POST /api/waybill-emit/:id
  */
 import { sleep, createDaemonClient } from './daemon-lib.js';
-import { createLogger, pickWaybillEmitData } from './daemon-logger.js';
+import { createLogger, formatValueToString, pickWaybillEmitData } from './daemon-logger.js';
 
 const log = createLogger('daemon-emit');
 
@@ -26,6 +26,43 @@ function maskApiKey(key) {
   return `…${s.slice(-4)}`;
 }
 
+/**
+ * @param {unknown} waybillId
+ * @returns {number|string}
+ */
+function waybillMapKey(waybillId) {
+  const n = Number(waybillId);
+  return Number.isFinite(n) ? n : String(waybillId);
+}
+
+/**
+ * Labels aligned with daemon-generate (human-readable refs).
+ * @param {Record<string, unknown>} row Claim item from API
+ * @returns {{ waybill: string, serviceOrder: string, manifest: string }}
+ */
+function claimRowToContext(row) {
+  return {
+    waybill: `(#: ${row.waybill_series}-${row.waybill_number}, id: ${row.waybill_id})`,
+    serviceOrder: `(#: ${row.service_order_series}-${row.service_order_number}, id: ${row.service_order_id})`,
+    manifest: `(#: ${row.manifest_number}, id: ${row.manifest_id})`,
+  };
+}
+
+/**
+ * @param {unknown[]} items
+ * @returns {Map<number|string, { waybill: string, serviceOrder: string, manifest: string }>}
+ */
+function buildClaimContextByWaybillId(items) {
+  const map = new Map();
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    if (row.waybill_id === undefined || row.waybill_id === null) continue;
+    map.set(waybillMapKey(row.waybill_id), claimRowToContext(row));
+  }
+  return map;
+}
+
 async function claimBatch(http) {
   const res = await http.post('/api/waybill-claim-for-send', { batch_size: BATCH_SIZE });
 
@@ -38,24 +75,34 @@ async function claimBatch(http) {
   return { ids, items };
 }
 
-async function emitOne(http, id) {
+/**
+ * @param {import('axios').AxiosInstance} http
+ * @param {number|string} id
+ * @param {Map<number|string, { waybill: string, serviceOrder: string, manifest: string }>} claimContextByWaybillId
+ */
+async function emitOne(http, id, claimContextByWaybillId) {
   const res = await http.post(`/api/waybill-emit/${id}`, {});
+
   const code = res.data && res.data.code;
   const msg = res.data && res.data.Message;
   const rawData = (res.data && res.data.data) || {};
   const nubefact = pickWaybillEmitData(rawData);
+  const ctx = claimContextByWaybillId.get(waybillMapKey(id));
+  const trace = ctx
+    ? { waybill: ctx.waybill, serviceOrder: ctx.serviceOrder, manifest: ctx.manifest }
+    : {};
+
   if (code === 'Success') {
-    log.info('emit_ok', {
-      waybill_id: id,
-      message: msg || '',
+    log.info('success', {
+      ...trace,
+      message: formatValueToString(msg) || '',
       nubefact,
     });
     return { ok: true };
   }
-  log.error('emit_fail', {
-    waybill_id: id,
-    message: msg || '',
-    apiCode: code,
+  log.error('', {
+    ...trace,
+    message: formatValueToString(msg) || '',
     nubefact: Object.keys(nubefact).length ? nubefact : undefined,
   });
   return { ok: false };
@@ -68,12 +115,14 @@ async function runOnce(http) {
     return { claimed: 0, ok: 0, fail: 0, durationMs: Date.now() - t0 };
   }
 
-  log.info('claim_batch', {
-    durationMs: Date.now() - t0,
-    count: ids.length,
-    waybill_ids: ids,
-    items,
-  });
+  const claimContextByWaybillId = buildClaimContextByWaybillId(items);
+
+  // log.info('claim_batch', {
+  //   durationMs: Date.now() - t0,
+  //   count: ids.length,
+  //   waybill_ids: ids,
+  //   items,
+  // });
 
   let ok = 0;
   let fail = 0;
@@ -82,7 +131,7 @@ async function runOnce(http) {
     while (queue.length) {
       const id = queue.shift();
       if (!id) break;
-      const r = await emitOne(http, id);
+      const r = await emitOne(http, id, claimContextByWaybillId);
       if (r.ok) ok++;
       else fail++;
       await sleep(POLL_INTERVAL_SEND_SUNAT);
@@ -110,7 +159,7 @@ async function main() {
       if (r.claimed > 0) {
         log.info('cycle_summary', {
           claimed: r.claimed,
-          ok: r.ok,
+          success: r.ok,
           fail: r.fail,
           durationMs: r.durationMs,
         });

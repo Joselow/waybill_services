@@ -27,6 +27,7 @@ async function consultBatch(http) {
   const t0 = Date.now();
   const res = await http.post('/api/waybill-consult-enviado-batch', { batch_size: BATCH_SIZE });
   const data = res.data.data || {};
+  
   return {
     durationMs: Date.now() - t0,
     processed: data.processed || 0,
@@ -49,29 +50,27 @@ async function main() {
     try {
       const r = await consultBatch(http);
       if (r.processed > 0) {
+      
+        for (const row of r.results) {
+          const payload = {
+            waybill: `(#: ${row.waybill_series}-${row.waybill_number}, id: ${row.waybill_id})`,
+            serviceOrder: `(#: ${row.service_order_series}-${row.service_order_number}, id: ${row.service_order_id})`,
+            manifest: `(#: ${row.manifest_number}, id: ${row.manifest_id})`,
+            document_status: row.document_status,
+            message: row.Message || '',
+          };
+          if (row.ok) {
+            log.info('success', payload);
+          } else {
+            log.warn('', payload);
+          }
+        }
         log.info('cycle_summary', {
           durationMs: r.durationMs,
           processed: r.processed,
           ok: r.ok,
           fail: r.fail,
         });
-        for (const row of r.results) {
-          const payload = {
-            waybill_id: row.waybill_id,
-            document_status: row.document_status,
-            series: row.series,
-            number: row.number,
-            manifest_id: row.manifest_id,
-            service_order_id: row.service_order_id,
-            message: row.Message || '',
-            ok: row.ok,
-          };
-          if (row.ok) {
-            log.info('consult_ok', payload);
-          } else {
-            log.warn('consult_fail', payload);
-          }
-        }
       }
     } catch (e) {
       log.logHttpError('cycle_error', e, {});

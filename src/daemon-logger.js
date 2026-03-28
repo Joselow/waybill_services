@@ -7,6 +7,49 @@
 
 const MAX_BODY_SNIPPET = 2000;
 
+/**
+ * Normaliza el mensaje / errores de respuestas tipo Nubefact (o backend similar):
+ * string, número, array de strings, array de objetos `{ message, service_order_id, … }`, objetos anidados.
+ * @param {unknown} value
+ */
+export function formatValueToString(value) {
+  if (value == null) {
+    return '';
+  }
+  const t = typeof value;
+  if (t === 'string') {
+    return value.trim();
+  }
+  if (t === 'number' || t === 'boolean') {
+    return String(value);
+  }
+  if (t === 'bigint') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((x) => formatValueToString(x))
+      .filter((s) => s.length > 0)
+      .join(' | ');
+  }
+
+  if (t === 'object') {
+    const o = /** @type {Record<string, unknown>} */ (value);
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return '[unserializable]';
+    }
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** @param {unknown} err */
 export function formatAxiosError(err) {
   if (err == null) {
@@ -20,7 +63,25 @@ export function formatAxiosError(err) {
     const message = any.message || String(err);
     let apiMessage = '';
     if (data && typeof data === 'object') {
-      apiMessage = String(data.Message ?? data.message ?? '');
+      const d = /** @type {Record<string, unknown>} */ (data);
+      const chunks = [];
+      const primary = d.Message ?? d.message;
+      if (primary !== undefined && primary !== null && primary !== '') {
+        const s = formatValueToString(primary);
+        if (s) chunks.push(s);
+      }
+      if (d.errors !== undefined && d.errors !== null && d.errors !== '') {
+        const s = formatValueToString(d.errors);
+        if (s) chunks.push(s);
+      }
+      if (!chunks.length) {
+        const fallback = d.detail ?? d.error;
+        if (fallback !== undefined && fallback !== null && fallback !== '') {
+          const s = formatValueToString(fallback);
+          if (s) chunks.push(s);
+        }
+      }
+      apiMessage = chunks.join(' — ');
     }
     let responseBody = '';
     if (data !== undefined) {
@@ -198,18 +259,25 @@ export function pickWaybillEmitData(data) {
   const keys = [
     'serie',
     'numero',
-    'serie_numero',
     'enlace',
     'aceptada_por_sunat',
-    'cadena_para_codigo_qr',
-    'sunat_description',
-    'sunat_note',
-    'codigo_hash',
+    // 'cadena_para_codigo_qr',
+    // 'sunat_description',
+    // 'sunat_note',
+    // 'codigo_hash',
+    'errors'
   ];
   /** @type {Record<string, unknown>} */
   const out = {};
   for (const k of keys) {
-    if (Object.prototype.hasOwnProperty.call(data, k)) {
+
+    if (k === 'errors') {
+      const errors = /** @type {Record<string, unknown>} */ (data)[k];
+      if (errors != undefined) {
+        out[k] = formatValueToString(errors);
+      }
+    }
+    else if (Object.prototype.hasOwnProperty.call(data, k)) {
       const v = /** @type {Record<string, unknown>} */ (data)[k];
       if (v !== undefined) {
         out[k] = v;

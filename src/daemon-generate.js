@@ -102,8 +102,6 @@ async function main() {
     try {
       await generateOnce(http);
     } catch (e) {
-      console.error(e.response?.data);
-      console.error(e.response.data?.Message || e.response.data?.message || e.response.data || e.response || e.message || e);
       log.logHttpError('cycle_error', e, {});
     }
     await sleep(GENERATE_POLL_INTERVAL_MS);
