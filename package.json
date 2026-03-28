@@ -7,9 +7,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/daemon.js",
-    "daemon:emit": "node src/daemon.js",
-    "daemon:generate": "node src/daemon-generate.js",
-    "daemon:consult": "node src/daemon-consult.js"
+    "emit": "node src/daemon-emit.js",
+    "generate": "node src/daemon-generate.js",
+    "consult": "node src/daemon-consult.js"
   },
   "keywords": [],
   "author": "",
